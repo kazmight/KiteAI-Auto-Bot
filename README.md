@@ -16,7 +16,6 @@ An automated bot for interacting with KiteAI testnet, performing daily tasks, an
 - Node.js v16+
 - Ethereum wallet private key(s)
 - [2Captcha API key](https://2captcha.com/)(for faucet claims)
-- KiteAI testnet access https://testnet.gokite.ai?referralCode=S86CD815
 
 ## Installation ⚙️
 
