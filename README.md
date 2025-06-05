@@ -102,9 +102,10 @@ The bot will:
 - The bot only interacts with official KiteAI endpoints
 - Code is open for audit
 
-## Contribution 🤝
+## Don't forget to join my telegram channel for update script
 
-Pull requests are welcome! For major changes, please open an issue first.
+https://t.me/dasarpemulung
+
 
 ## Disclaimer ⚠️
 
