@@ -66,10 +66,6 @@ The bot will:
 - The bot only interacts with official KiteAI endpoints
 - Code is open for audit
 
-## Don't forget to join my telegram channel for update script
-
-https://t.me/dasarpemulung
-
 
 ## Disclaimer ⚠️
 
