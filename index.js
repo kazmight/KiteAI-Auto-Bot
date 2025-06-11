@@ -1,754 +1,612 @@
-require('dotenv').config();
-const axios = require('axios');
 const { ethers } = require('ethers');
-const crypto = require('crypto');
-const UserAgent = require('user-agents');
-const readline = require('readline').createInterface({
-    input: process.stdin,
-    output: process.stdout
-});
-const fs = require('fs').promises;
+const fs = require('fs');
+const path = require('path');
+const readline = require('readline');
+require('dotenv').config(); // Make sure this is at the very top to load .env variables
 
 const colors = {
-    green: '\x1b[32m',
-    yellow: '\x1b[33m',
-    red: '\x1b[31m',
-    white: '\x1b[37m',
-    cyan: '\x1b[36m',
-    reset: '\x1b[0m',
-    bold: '\x1b[1m'
+    reset: "\x1b[0m",
+    cyan: "\x1b[36m",
+    green: "\x1b[32m",
+    yellow: "\x1b[33m",
+    red: "\x1b[31m",
+    white: "\x1b[37m",
+    bold: "\x1b[1m"
 };
 
 const logger = {
-    info: (msg) => console.log(`${colors.green}[✓] ${msg}${colors.reset}`),
-    wallet: (msg) => console.log(`${colors.yellow}[➤] ${msg}${colors.reset}`),
-    error: (msg) => console.log(`${colors.red}[✗] ${msg}${colors.reset}`),
-    success: (msg) => console.log(`${colors.green}[] ${msg}${colors.reset}`),
-    loading: (msg) => console.log(`${colors.cyan}[⟳] ${msg}${colors.reset}`),
-    step: (msg) => console.log(`${colors.white}[➤] ${msg}${colors.reset}`),
+    info: (msg) => console.log(`${colors.green}[📣] ${msg}${colors.reset}`),
+    warn: (msg) => console.log(`${colors.yellow}[⛔] ${msg}${colors.reset}`),
+    error: (msg) => console.log(`${colors.red}[❎] ${msg}${colors.reset}`),
+    success: (msg) => console.log(`${colors.green}[✅] ${msg}${colors.reset}`),
+    loading: (msg) => console.log(`${colors.cyan}[⌛] ${msg}${colors.reset}`),
+    step: (msg) => console.log(`${colors.white}[🔄] ${msg}${colors.reset}`),
+    userInfo: (msg) => console.log(`${colors.white}[📌] ${msg}${colors.reset}`),
+    // Added for password messages
+    passwordPrompt: (msg) => console.log(`${colors.yellow}[🔒] ${msg}${colors.reset}`),
+    passwordCorrect: (msg) => console.log(`${colors.green}[✅] ${msg}${colors.reset}`),
+    passwordIncorrect: (msg) => console.log(`${colors.red}[❌] ${msg}${colors.reset}`),
     banner: () => {
         console.log(`${colors.cyan}${colors.bold}`);
-        console.log('██╗░░██╗██╗████████╗███████╗░█████╗░██╗  ██████╗░░█████╗░████████╗');
-        console.log('██║░██╔╝██║╚══██╔══╝██╔════╝██╔══██╗██║  ██╔══██╗██╔══██╗╚══██╔══╝');
-        console.log('█████═╝░██║░░░██║░░░█████╗░░███████║██║  ██████╦╝██║░░██║░░░██║░░░');
-        console.log('██╔═██╗░██║░░░██║░░░██╔══╝░░██╔══██║██║  ██╔══██╗██║░░██║░░░██║░░░');
-        console.log('██║░╚██╗██║░░░██║░░░███████╗██║░░██║██║  ██████╦╝╚█████╔╝░░░██║░░░');
-        console.log('╚═╝░░╚═╝╚═╝░░░╚═╝░░░╚══════╝╚═╝░░╚═╝╚═╝  ╚═════╝░░╚════╝░░░░╚═╝░░░');
+        console.log('░█████╗░██████╗░███████╗███╗░░██╗███████╗██╗');
+        console.log('██╔══██╗██╔══██╗██╔════╝████╗░██║██╔════╝██║');
+        console.log('██║░░██║██████╔╝█████╗░░██╔██╗██║█████╗░░██║');
+        console.log('██║░░██║██╔═══╝░██╔══╝░░██║╚████║██╔══╝░░██║');
+        console.log('╚█████╔╝██║░░░░░███████╗██║░╚███║██║░░░░░██║');
+        console.log('░╚════╝░╚═╝░░░░░╚══════╝╚═╝░░╚══╝╚═╝░░░░░╚═╝');
         console.log('\nby Kazmight');
         console.log(`${colors.reset}\n`);
-
-    },
-    agent: (msg) => console.log(`${colors.white}${msg}${colors.reset}`)
+    }
 };
 
-const agents = [
-    { name: 'Professor', service_id: 'deployment_KiMLvUiTydioiHm7PWZ12zJU' },
-    { name: 'Crypto Buddy', service_id: 'deployment_ByVHjMD6eDb9AdekRIbyuz14' },
-    { name: 'Sherlock', service_id: 'deployment_OX7sn2D0WvxGUGK8CTqsU5VJ' }
+const NETWORK_CONFIG = {
+    rpc: 'https://testnet.dplabs-internal.com',
+    chainId: 688688,
+    symbol: 'PHRS',
+    explorer: 'https://pharos-testnet.socialscan.io/'
+};
+
+const CONTRACTS = {
+    LENDING_POOL: '0xa8e550710bf113db6a1b38472118b8d6d5176d12',
+    FAUCET: '0x2e9d89d372837f71cb529e5ba85bfbc1785c69cd',
+    SUPPLY_CONTRACT: '0xad3b4e20412a097f87cd8e8d84fbbe17ac7c89e9',
+    TOKENS: {
+        GOLD: '0x77f532df5f46ddff1c97cdae3115271a523fa0f4',
+        USDT: '0x0b00fb1f513e02399667fba50772b21f34c1b5d9',
+        TSLA: '0xcda3df4aab8a571688fe493eb1bdc1ad210c09e4',
+        USDC: '0x48249feeb47a8453023f702f15cf00206eebdf08',
+        NVIDIA: '0x3299cc551b2a39926bf14144e65630e533df6944',
+        BTC: '0xa4a967fc7cf0e9815bf5c2700a055813628b65be'
+    }
+};
+
+const ERC20_ABI = [
+    "function approve(address spender, uint256 amount) external returns (bool)",
+    "function balanceOf(address account) external view returns (uint256)",
+    "function decimals() external view returns (uint8)"
 ];
 
-const loadPrompts = async () => {
-    try {
-        const content = await fs.readFile('prompt.txt', 'utf8');
-        const lines = content.split('\n').map(line => line.trim());
-        const promptGenerators = {};
-        let currentAgent = null;
+const FAUCET_ABI = [
+    "function mint(address _asset, address _account, uint256 _amount) external"
+];
 
-        for (const line of lines) {
-            if (line.startsWith('[') && line.endsWith(']')) {
-                currentAgent = line.slice(1, -1).trim();
-                promptGenerators[currentAgent] = [];
-            } else if (line && !line.startsWith('#') && currentAgent) {
-                promptGenerators[currentAgent].push(line);
-            }
-        }
+const LENDING_POOL_ABI = [
+    "function depositETH(address lendingPool, address onBehalfOf, uint16 referralCode) external payable",
+    "function borrow(address asset, uint256 amount, uint256 interestRateMode, uint16 referralCode, address onBehalfOf) external",
+    "function withdraw(address asset, uint256 amount, address to) external"
+];
 
-        for (const agent of agents) {
-            if (!promptGenerators[agent.name] || promptGenerators[agent.name].length === 0) {
-                logger.error(`No prompts found for agent ${agent.name} in prompt.txt`);
-                process.exit(1);
-            }
-        }
-
-        return promptGenerators;
-    } catch (error) {
-        logger.error(`Failed to load prompt.txt: ${error.message}`);
-        process.exit(1);
-    }
-};
-
-const getRandomPrompt = (agentName, promptGenerators) => {
-    const prompts = promptGenerators[agentName] || [];
-    return prompts[Math.floor(Math.random() * prompts.length)];
-};
-
-const userAgent = new UserAgent();
-const baseHeaders = {
-    'Accept': 'application/json, text/plain, */*',
-    'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
-    'Origin': 'https://testnet.gokite.ai',
-    'Referer': 'https://testnet.gokite.ai/',
-    'Sec-Fetch-Dest': 'empty',
-    'Sec-Fetch-Mode': 'cors',
-    'Sec-Fetch-Site': 'same-site',
-    'User-Agent': userAgent.toString(),
-    'Content-Type': 'application/json'
-};
-
-const KITE_AI_SUBNET = '0xb132001567650917d6bd695d1fab55db7986e9a5';
-
-const getWallet = (privateKey) => {
-    try {
-        const wallet = new ethers.Wallet(privateKey);
-        logger.info(`Wallet created: ${wallet.address}`);
-        return wallet;
-    } catch (error) {
-        logger.error(`Invalid private key: ${error.message}`);
-        return null;
-    }
-};
-
-const encryptAddress = (address) => {
-    try {
-        const keyHex = '6a1c35292b7c5b769ff47d89a17e7bc4f0adfe1b462981d28e0e9f7ff20b8f8a';
-        const key = Buffer.from(keyHex, 'hex');
-        const iv = crypto.randomBytes(12);
-        const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-
-        let encrypted = cipher.update(address, 'utf8');
-        encrypted = Buffer.concat([encrypted, cipher.final()]);
-        const authTag = cipher.getAuthTag();
-
-        const result = Buffer.concat([iv, encrypted, authTag]);
-        return result.toString('hex');
-    } catch (error) {
-        logger.error(`Auth token generation failed for ${address}`);
-        return null;
-    }
-};
-
-const extractCookies = (headers) => {
-    try {
-        const rawCookies = headers['set-cookie'] || [];
-        const skipKeys = ['expires', 'path', 'domain', 'samesite', 'secure', 'httponly', 'max-age'];
-        const cookiesDict = {};
-
-        for (const cookieStr of rawCookies) {
-            const parts = cookieStr.split(';');
-            for (const part of parts) {
-                const cookie = part.trim();
-                if (cookie.includes('=')) {
-                    const [name, value] = cookie.split('=', 2);
-                    if (name && value && !skipKeys.includes(name.toLowerCase())) {
-                        cookiesDict[name] = value;
-                    }
-                }
-            }
-        }
-
-        return Object.entries(cookiesDict).map(([key, value]) => `${key}=${value}`).join('; ') || null;
-    } catch (error) {
-        return null;
-    }
-};
-
-const solveRecaptcha = async (url, apiKey, maxRetries = 3) => {
-    const siteKey = '6Lc_VwgrAAAAALtx_UtYQnW-cFg8EPDgJ8QVqkaz';
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-            logger.loading(`Solving reCAPTCHA with 2Captcha (Attempt ${attempt}/${maxRetries})`);
-
-            const requestUrl = `http://2captcha.com/in.php?key=${apiKey}&method=userrecaptcha&googlekey=${siteKey}&pageurl=${url}&json=1`;
-            const requestResponse = await axios.get(requestUrl);
-
-            if (requestResponse.data.status !== 1) {
-                logger.error(`Failed to submit reCAPTCHA task: ${requestResponse.data.error_text}`);
-                if (attempt === maxRetries) return null;
-                await new Promise(resolve => setTimeout(resolve, 5000));
-                continue;
-            }
-
-            const requestId = requestResponse.data.request;
-            logger.step(`reCAPTCHA task submitted, ID: ${requestId}`);
-
-            let pollAttempts = 0;
-            const maxPollAttempts = 30;
-            const pollInterval = 5000;
-
-            while (pollAttempts < maxPollAttempts) {
-                await new Promise(resolve => setTimeout(resolve, pollInterval));
-                const resultUrl = `http://2captcha.com/res.php?key=${apiKey}&action=get&id=${requestId}&json=1`;
-                const resultResponse = await axios.get(resultUrl);
-
-                if (resultResponse.data.status === 1) {
-                    logger.success('reCAPTCHA solved successfully');
-                    return resultResponse.data.request;
-                }
-
-                if (resultResponse.data.request === 'ERROR_CAPTCHA_UNSOLVABLE') {
-                    logger.error('reCAPTCHA unsolvable');
-                    if (attempt === maxRetries) return null;
-                    break; // Break to retry the whole solveRecaptcha process
-                }
-
-                pollAttempts++;
-                logger.step(`Waiting for reCAPTCHA solution (Attempt ${pollAttempts}/${maxPollAttempts})`);
-            }
-        } catch (error) {
-            logger.error(`reCAPTCHA solving error: ${error.message}`);
-            if (attempt === maxRetries) return null;
-            await new Promise(resolve => setTimeout(resolve, 5000));
-        }
-    }
-
-    logger.error('reCAPTCHA solving failed after maximum retries');
-    return null;
-};
-
-const claimDailyFaucet = async (access_token, cookieHeader, apiKey) => {
-    try {
-        logger.loading('Attempting to claim daily faucet...');
-
-        const pageUrl = 'https://testnet.gokite.ai';
-        const recaptchaToken = await solveRecaptcha(pageUrl, apiKey);
-
-        if (!recaptchaToken) {
-            logger.error('Failed to obtain reCAPTCHA token');
-            return false;
-        }
-
-        const faucetHeaders = {
-            ...baseHeaders,
-            Authorization: `Bearer ${access_token}`,
-            'x-recaptcha-token': recaptchaToken
-        };
-
-        if (cookieHeader) {
-            faucetHeaders['Cookie'] = cookieHeader;
-        }
-
-        const response = await axios.post('https://ozone-point-system.prod.gokite.ai/blockchain/faucet-transfer', {}, {
-            headers: faucetHeaders
+class PharosBot {
+    constructor() {
+        // We will keep a single readline interface instance for the whole bot
+        this.rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout
         });
-
-        if (response.data.error) {
-            logger.error(`Faucet claim failed: ${response.data.error}`);
-            return false;
-        }
-
-        logger.success('Daily faucet claimed successfully');
-        return true;
-    } catch (error) {
-        logger.error(`Faucet claim error: ${error.response?.data?.error || error.message}`);
-        return false;
+        this.wallets = [];
     }
-};
 
-const getStakeInfo = async (access_token, cookieHeader) => {
-    try {
-        logger.loading('Fetching stake information...');
+    async initialize() {
+        logger.banner();
 
-        const stakeHeaders = {
-            ...baseHeaders,
-            Authorization: `Bearer ${access_token}`
-        };
-
-        if (cookieHeader) {
-            stakeHeaders['Cookie'] = cookieHeader;
+        const correctPassword = process.env.BOT_PASSWORD;
+        if (!correctPassword) {
+            logger.error('Environment variable BOT_PASSWORD is not set. Please set it before running the script.');
+            process.exit(1);
         }
 
-        const response = await axios.get('https://ozone-point-system.prod.gokite.ai/subnet/3/staked-info?id=3', {
-            headers: stakeHeaders
-        });
+        // --- MODIFIED PASSWORD INPUT ---
+        // Use getUserInput directly, which now handles standard input
+        let enteredPassword = await this.getUserInput('Enter password: ');
+        if (enteredPassword !== correctPassword) {
+            logger.passwordIncorrect('Incorrect password! Exiting...');
+            // Ensure the readline interface is closed before exiting
+            this.rl.close();
+            process.exit(1);
+        }
+        logger.passwordCorrect('Password correct! Initializing...');
+        // --- END OF MODIFIED PASSWORD INPUT ---
 
-        if (response.data.error) {
-            logger.error(`Failed to fetch stake info: ${response.data.error}`);
+        await this.loadWallets();
+        logger.success(`Initialized with ${this.wallets.length} wallets`);
+    }
+
+    async loadWallets() {
+        const privateKeys = [];
+        let i = 1;
+
+        while (process.env[`PRIVATE_KEY_${i}`]) {
+            privateKeys.push(process.env[`PRIVATE_KEY_${i}`]);
+            i++;
+        }
+
+        if (privateKeys.length === 0) {
+            logger.error('No private keys found in .env file. Please add PRIVATE_KEY_1, PRIVATE_KEY_2, etc.');
+            this.rl.close(); // Close readline before exiting
+            process.exit(1);
+        }
+
+        for (let j = 0; j < privateKeys.length; j++) {
+            const provider = new ethers.JsonRpcProvider(NETWORK_CONFIG.rpc, {
+                chainId: NETWORK_CONFIG.chainId,
+                name: 'pharos-testnet'
+            });
+            const wallet = new ethers.Wallet(privateKeys[j], provider);
+            this.wallets.push(wallet);
+            logger.info(`Wallet ${j + 1}: ${wallet.address}`);
+        }
+    }
+
+    
+    async getUserInput(question) {
+        return new Promise((resolve) => {
+            this.rl.question(question + ' ', (answer) => { // Add a space for better prompt alignment
+                resolve(answer.trim());
+            });
+        });
+    }
+
+    // Removed the separate getPasswordInput function as getUserInput is now sufficient
+
+    async getRandomDelay(seconds) {
+        const delayMs = seconds * 1000;
+        logger.loading(`Delaying for ${seconds} seconds...`);
+        return new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+
+    async showMenu() {
+        console.log(`\n${colors.cyan}${colors.bold}       OPENFI AUTO TRANSACTION    ${colors.reset}`);
+        console.log(`${colors.green}${colors.bold} Join Telegram Channel Dasar Pemulung${colors.reset}`);
+        console.log(`${colors.white}1. Supply PHRS${colors.reset}`);
+        console.log(`${colors.white}2. Mint Faucet Tokens${colors.reset}`);
+        console.log(`${colors.white}3. Supply ERC20 Tokens${colors.reset}`);
+        console.log(`${colors.white}4. Borrow Tokens${colors.reset}`);
+        console.log(`${colors.white}5. Withdraw Tokens${colors.reset}`);
+        console.log(`${colors.reset}\n`);
+
+        // Removed the extra console.log here, as getUserInput will print the prompt
+        const choice = await this.getUserInput('Select an option (1-5):');
+        return choice;
+    }
+
+    async promptTransactionDetails() {
+        const transactions = await this.getUserInput('Enter number of transactions per wallet (e.g., 1-10):');
+        const delay = await this.getUserInput('Enter delay between transactions in seconds (e.g., 20):');
+
+        const txCount = parseInt(transactions);
+        const parsedDelay = parseFloat(delay);
+
+        if (isNaN(txCount) || txCount <= 0 || isNaN(parsedDelay) || parsedDelay < 0) {
+            logger.error('Invalid input for transaction count or delay. Please enter valid numbers.');
             return null;
         }
-
-        return response.data.data;
-    } catch (error) {
-        logger.error(`Stake info fetch error: ${error.response?.data?.error || error.message}`);
-        return null;
+        return { txCount, delay: parsedDelay };
     }
-};
 
-const stakeToken = async (access_token, cookieHeader, maxRetries = 5) => {
-    try {
-        logger.loading('Attempting to stake 1 KITE token...');
+    async executeTransactionWithRetry(wallet, transactionFunction, transactionName, txCountIndex, totalTxCount, tokenSymbol, initialDelay, isApprove = false) {
+        let txFailed = true;
+        let retries = 0;
+        const maxRetries = 5;
 
-        const stakeHeaders = {
-            ...baseHeaders,
-            Authorization: `Bearer ${access_token}`
-        };
-
-        if (cookieHeader) {
-            stakeHeaders['Cookie'] = cookieHeader;
-        }
-
-        const payload = {
-            subnet_address: KITE_AI_SUBNET,
-            amount: 1
-        };
-
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        while (txFailed && retries < maxRetries) {
             try {
-                const response = await axios.post('https://ozone-point-system.prod.gokite.ai/subnet/delegate', payload, {
-                    headers: stakeHeaders
-                });
+                logger.loading(`${transactionName} ${tokenSymbol ? tokenSymbol + ' - ' : ''}Transaction ${txCountIndex + 1}/${totalTxCount} for wallet ${wallet.address} (Attempt ${retries + 1})`);
 
-                if (response.data.error) {
-                    logger.error(`Stake failed: ${response.data.error}`);
-                    // If it's an error indicating already staked, we can consider it a success for this operation
-                    if (response.data.error.includes("already staked") || response.data.error.includes("already delegating")) {
-                        logger.success('Already staked or delegating, skipping further stake attempts for this wallet.');
-                        return true;
-                    }
-                    return false;
-                }
+                const currentNonce = await wallet.provider.getTransactionCount(wallet.address, 'latest');
 
-                logger.success(`Successfully staked 1 KITE token`);
-                return true;
+                const tx = await transactionFunction(currentNonce);
+
+                logger.info(`TX Hash: ${tx.hash}`);
+                const receipt = await tx.wait();
+                logger.success(`${transactionName} transaction ${txCountIndex + 1} confirmed`);
+                logger.step(`Explorer: ${NETWORK_CONFIG.explorer}tx/${receipt.hash}`);
+
+                txFailed = false;
             } catch (error) {
-                if (error.response?.data?.error?.includes("already staked") || error.response?.data?.error?.includes("already delegating")) {
-                    logger.success('Already staked or delegating, skipping further stake attempts for this wallet.');
-                    return true;
+                logger.error(`${transactionName} transaction ${txCountIndex + 1} failed for wallet ${wallet.address} (Attempt ${retries + 1}): ${error.message}`);
+
+                if (error.message.includes("nonce has already been used") || error.message.includes("TX_REPLAY_ATTACK") || error.message.includes("replacement transaction underpriced")) {
+                    logger.warn("Nonce conflict or underpriced replacement detected. Retrying with a fresh nonce...");
+                } else if (error.message.includes("insufficient funds")) {
+                    logger.error("Insufficient funds for transaction. Cannot retry.");
+                    txFailed = false;
+                } else {
+                    logger.error("Non-nonce related error. Stopping retries for this transaction.");
+                    txFailed = false;
                 }
-                if (attempt === maxRetries) {
-                    logger.error(`Stake error after ${maxRetries} attempts: ${error.response?.data?.error || error.message}`);
-                    return false;
+                retries++;
+                if (txFailed && retries < maxRetries) {
+                    await this.getRandomDelay(initialDelay + (retries * 5));
+                } else if (txFailed) {
+                    logger.error(`Transaction ${txCountIndex + 1} permanently failed for wallet ${wallet.address} after ${maxRetries} attempts.`);
                 }
-                logger.step(`Stake attempt ${attempt} failed, retrying in 5 seconds...`);
-                await new Promise(resolve => setTimeout(resolve, 5000));
             }
         }
-    } catch (error) {
-        logger.error(`Stake error: ${error.response?.data?.error || error.message}`);
-        return false;
+        return !txFailed;
     }
-};
 
-const claimStakeRewards = async (access_token, cookieHeader, maxRetries = 5) => {
-    try {
-        logger.loading('Attempting to claim stake rewards...');
 
-        const claimHeaders = {
-            ...baseHeaders,
-            Authorization: `Bearer ${access_token}`
-        };
+    async supplyPHRS() {
+        logger.step('Starting PHRS Supply Process');
 
-        if (cookieHeader) {
-            claimHeaders['Cookie'] = cookieHeader;
-        }
+        const amount = await this.getUserInput('Enter amount of PHRS to supply:');
+        const details = await this.promptTransactionDetails();
+        if (!details) return;
+        const { txCount, delay } = details;
 
-        const payload = {
-            subnet_address: KITE_AI_SUBNET
-        };
+        const amountWei = ethers.parseEther(amount);
 
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        for (let i = 0; i < this.wallets.length; i++) {
+            const wallet = this.wallets[i];
+            logger.loading(`Processing wallet ${i + 1}: ${wallet.address}`);
+
             try {
-                const response = await axios.post('https://ozone-point-system.prod.gokite.ai/subnet/claim-rewards', payload, {
-                    headers: claimHeaders
-                });
+                const balance = await wallet.provider.getBalance(wallet.address);
+                logger.info(`Wallet balance: ${ethers.formatEther(balance)} PHRS`);
 
-                if (response.data.error) {
-                    logger.error(`Claim rewards failed: ${response.data.error}`);
-                    // If no rewards are available, consider it a success for this operation
-                    if (response.data.error.includes("no rewards to claim")) {
-                        logger.info('No rewards to claim at this time.');
-                        return true;
+                if (balance < amountWei * BigInt(txCount)) {
+                    logger.warn(`Insufficient balance for wallet ${i + 1}. Skipping.`);
+                    continue;
+                }
+
+                const lendingContract = new ethers.Contract(
+                    CONTRACTS.LENDING_POOL,
+                    LENDING_POOL_ABI,
+                    wallet
+                );
+
+                for (let j = 0; j < txCount; j++) {
+                    const transactionFunction = async (nonce) => {
+                        return await lendingContract.depositETH(
+                            '0x0000000000000000000000000000000000000000',
+                            wallet.address,
+                            0, // referralCode
+                            { value: amountWei, nonce: nonce }
+                        );
+                    };
+                    const success = await this.executeTransactionWithRetry(wallet, transactionFunction, 'PHRS Supply', j, txCount, null, delay);
+                    if (j < txCount - 1 && success) {
+                        await this.getRandomDelay(delay);
                     }
-                    return false;
                 }
-
-                const reward = response.data.data?.claim_amount || 0;
-                logger.success(`Successfully claimed ${reward} KITE rewards`);
-                return true;
             } catch (error) {
-                if (error.response?.data?.error?.includes("no rewards to claim")) {
-                    logger.info('No rewards to claim at this time.');
-                    return true;
-                }
-                if (attempt === maxRetries) {
-                    logger.error(`Claim rewards error after ${maxRetries} attempts: ${error.response?.data?.error || error.message}`);
-                    return false;
-                }
-                logger.step(`Claim rewards attempt ${attempt} failed, retrying in 5 seconds...`);
-                await new Promise(resolve => setTimeout(resolve, 5000));
+                logger.error(`Error processing wallet ${i + 1}: ${error.message}`);
+            }
+
+            if (i < this.wallets.length - 1) {
+                await this.getRandomDelay(delay);
             }
         }
-    } catch (error) {
-        logger.error(`Claim rewards error: ${error.response?.data?.error || error.message}`);
-        return false;
+        logger.success('PHRS Supply Process Completed.');
     }
-};
 
-const login = async (wallet, neo_session = null, refresh_token = null, maxRetries = 3) => {
-    const url = 'https://neo.prod.gokite.ai/v2/signin';
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-            logger.loading(`Logging in to ${wallet.address} (Attempt ${attempt}/${maxRetries})`);
+    async mintFaucetTokens() {
+        logger.step('Starting Faucet Token Minting');
 
-            const authToken = encryptAddress(wallet.address);
-            if (!authToken) {
-                logger.error("Failed to generate auth token.");
-                return null;
-            }
-
-            const loginHeaders = {
-                ...baseHeaders,
-                'Authorization': authToken,
-            };
-
-            if (neo_session || refresh_token) {
-                const cookies = [];
-                if (neo_session) cookies.push(`neo_session=${neo_session}`);
-                if (refresh_token) cookies.push(`refresh_token=${refresh_token}`);
-                if (cookies.length > 0) {
-                    loginHeaders['Cookie'] = cookies.join('; ');
-                }
-            }
-
-            const body = { eoa: wallet.address };
-            const response = await axios.post(url, body, { headers: loginHeaders });
-
-            if (response.data.error) {
-                logger.error(`Login failed for ${wallet.address}: ${response.data.error}`);
-                if (attempt === maxRetries) return null;
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                continue;
-            }
-
-            const { access_token, aa_address, displayed_name, avatar_url } = response.data.data;
-            const cookieHeader = extractCookies(response.headers);
-
-            let resolved_aa_address = aa_address;
-            if (!resolved_aa_address) {
-                const profile = await getUserProfile(access_token);
-                resolved_aa_address = profile?.profile?.smart_account_address;
-                if (!resolved_aa_address) {
-                    logger.error(`No aa_address found for ${wallet.address}`);
-                    return null;
-                }
-            }
-
-            logger.success(`Login successful for ${wallet.address}`);
-            return { access_token, aa_address: resolved_aa_address, displayed_name, avatar_url, cookieHeader };
-        } catch (error) {
-            const errorMessage = error.response?.data?.error || error.message;
-            if (attempt === maxRetries) {
-                logger.error(`Login failed for ${wallet.address} after ${maxRetries} attempts: ${errorMessage}. Check cookies or contact Kite AI support.`);
-                return null;
-            }
-            logger.step(`Login attempt ${attempt} failed, retrying in 2 seconds...`);
-            await new Promise(resolve => setTimeout(resolve, 2000));
-        }
-    }
-    return null; // Should not reach here
-};
-
-
-const getUserProfile = async (access_token) => {
-    try {
-        const response = await axios.get('https://ozone-point-system.prod.gokite.ai/me', {
-            headers: { ...baseHeaders, Authorization: `Bearer ${access_token}` }
+        console.log('\nAvailable tokens for minting:');
+        const tokenNames = Object.keys(CONTRACTS.TOKENS);
+        tokenNames.forEach((token, index) => {
+            console.log(`${index + 1}. ${token}`);
         });
 
-        if (response.data.error) {
-            logger.error(`Failed to fetch profile: ${response.data.error}`);
-            return null;
-        }
+        const tokenChoice = await this.getUserInput('Select token to mint (1-5):');
+        const tokenIndex = parseInt(tokenChoice) - 1;
 
-        return response.data.data;
-    } catch (error) {
-        logger.error(`Profile fetch error: ${error.message}`);
-        return null;
-    }
-};
-
-const interactWithAgent = async (access_token, aa_address, cookieHeader, agent, prompt, interactionCount, maxRetries = 5) => {
-    try {
-        if (!aa_address) {
-            logger.error(`Cannot interact with ${agent.name}: No aa_address`);
-            return null;
-        }
-
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            logger.step(`Interaction ${interactionCount} - Prompts : ${prompt} (Attempt ${attempt}/${maxRetries})`);
-
-            try {
-                // Step 1: Send inference request
-                const inferenceHeaders = {
-                    ...baseHeaders,
-                    Authorization: `Bearer ${access_token}`,
-                    Accept: 'text/event-stream'
-                };
-                if (cookieHeader) {
-                    inferenceHeaders['Cookie'] = cookieHeader;
-                }
-
-                // Increased timeout for inference request
-                const inferenceResponse = await axios.post('https://ozone-point-system.prod.gokite.ai/agent/inference', {
-                    service_id: agent.service_id,
-                    subnet: 'kite_ai_labs',
-                    stream: true,
-                    body: { stream: true, message: prompt }
-                }, {
-                    headers: inferenceHeaders,
-                    timeout: 60000 // 60 seconds timeout for inference
-                });
-
-                let output = '';
-                const lines = inferenceResponse.data.split('\n');
-                for (const line of lines) {
-                    if (line.startsWith('data: ') && line !== 'data: [DONE]') {
-                        try {
-                            const data = JSON.parse(line.replace('data: ', ''));
-                            if (data.choices && data.choices[0].delta.content) {
-                                output += data.choices[0].delta.content;
-                                // Limit output length for logging
-                                if (output.length > 100) {
-                                    output = output.substring(0, 100) + '...';
-                                    break;
-                                }
-                            }
-                        } catch (e) {
-                            // Ignore parsing errors for incomplete data lines
-                        }
-                    }
-                }
-
-                // Step 2: Submit receipt
-                const receiptHeaders = {
-                    ...baseHeaders,
-                    Authorization: `Bearer ${access_token}`
-                };
-                if (cookieHeader) {
-                    receiptHeaders['Cookie'] = cookieHeader;
-                }
-
-                const receiptResponse = await axios.post('https://neo.prod.gokite.ai/v2/submit_receipt', {
-                    address: aa_address,
-                    service_id: agent.service_id,
-                    input: [{ type: 'text/plain', value: prompt }],
-                    output: [{ type: 'text/plain', value: output || 'No response' }]
-                }, {
-                    headers: receiptHeaders
-                });
-
-                if (receiptResponse.data.error) {
-                    logger.error(`Receipt submission failed for ${agent.name}: ${receiptResponse.data.error}`);
-                    if (attempt === maxRetries) return null;
-                    logger.step(`Retrying interaction with ${agent.name} in 5 seconds...`);
-                    await new Promise(resolve => setTimeout(resolve, 5000));
-                    continue; // Continue to the next attempt for this interaction
-                }
-
-                const { id } = receiptResponse.data.data;
-                logger.step(`Interaction ${interactionCount} - Receipt submitted, ID: ${id}`);
-
-                // Step 3: Poll for status
-                let statusAttempts = 0;
-                const maxStatusAttempts = 20; // Increased polling attempts
-                const pollInterval = 3000; // Increased poll interval
-
-                while (statusAttempts < maxStatusAttempts) {
-                    await new Promise(resolve => setTimeout(resolve, pollInterval));
-                    const statusResponse = await axios.get(`https://neo.prod.gokite.ai/v1/inference?id=${id}`, {
-                        headers: { ...baseHeaders, Authorization: `Bearer ${access_token}` }
-                    });
-
-                    if (statusResponse.data.data.processed_at && statusResponse.data.data.tx_hash) {
-                        logger.success(`Interaction ${interactionCount} - Inference processed, tx_hash : ${statusResponse.data.data.tx_hash}`);
-                        return statusResponse.data.data;
-                    }
-
-                    statusAttempts++;
-                    logger.step(`Interaction ${interactionCount} - Waiting for inference processing (Attempt ${statusAttempts}/${maxStatusAttempts})`);
-                }
-
-                logger.error(`Inference status not completed after ${maxStatusAttempts} attempts for ${agent.name}.`);
-                // If status not completed after max attempts, try the entire interaction again
-                if (attempt === maxRetries) return null;
-                logger.step(`Retrying interaction with ${agent.name} (failed to confirm processing) in 5 seconds...`);
-                await new Promise(resolve => setTimeout(resolve, 5000));
-            } catch (error) {
-                const errorMessage = error.response?.data?.error || error.message;
-                logger.error(`Error interacting with ${agent.name}: ${errorMessage}`);
-                if (attempt === maxRetries) return null;
-                logger.step(`Retrying interaction with ${agent.name} in 5 seconds...`);
-                await new Promise(resolve => setTimeout(resolve, 5000));
-            }
-        }
-        return null; // All retries failed
-    } catch (outerError) {
-        logger.error(`Unexpected error in interactWithAgent for ${agent.name}: ${outerError.message}`);
-        return null;
-    }
-};
-
-
-const getNextRunTime = () => {
-    const now = new Date();
-    now.setHours(now.getHours() + 24);
-    now.setMinutes(0);
-    now.setSeconds(0);
-    now.setMilliseconds(0);
-    return now;
-};
-
-const displayCountdown = (nextRunTime, interactionCount, apiKey) => {
-    const updateCountdown = () => {
-        const now = new Date();
-        const timeLeft = nextRunTime - now;
-
-        if (timeLeft <= 0) {
-            logger.info('Starting new daily run...');
-            clearInterval(countdownInterval);
-            dailyRun(interactionCount, apiKey);
+        if (tokenIndex < 0 || tokenIndex >= tokenNames.length) {
+            logger.error('Invalid token selection');
             return;
         }
 
-        const hours = Math.floor(timeLeft / (1000 * 60 * 60));
-        const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
-        const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
+        const selectedToken = tokenNames[tokenIndex];
+        const tokenAddress = CONTRACTS.TOKENS[selectedToken];
 
-        process.stdout.write(`\r${colors.cyan}[⏰] Next run in: ${hours}h ${minutes}m ${seconds}s${colors.reset} `);
-    };
+        const amount = await this.getUserInput(`Enter amount of ${selectedToken} to mint:`);
+        const details = await this.promptTransactionDetails();
+        if (!details) return;
+        const { txCount, delay } = details;
 
-    updateCountdown();
-    const countdownInterval = setInterval(updateCountdown, 1000);
-};
+        const decimals = (selectedToken === 'USDT' || selectedToken === 'USDC' || selectedToken === 'BTC') ? 6 : 18;
+        const amountWei = ethers.parseUnits(amount, decimals);
 
-let interactionCount = null;
-let apiKey = null;
+        for (let i = 0; i < this.wallets.length; i++) {
+            const wallet = this.wallets[i];
+            logger.loading(`Processing wallet ${i + 1}: ${wallet.address}`);
 
-const dailyRun = async (count, key) => {
-    logger.banner();
+            try {
+                const faucetContract = new ethers.Contract(
+                    CONTRACTS.FAUCET,
+                    FAUCET_ABI,
+                    wallet
+                );
 
-    const promptGenerators = await loadPrompts();
-
-    const wallets = Object.keys(process.env)
-        .filter(key => key.startsWith('PRIVATE_KEY_'))
-        .map(key => ({
-            privateKey: process.env[key],
-            neo_session: process.env[`NEO_SESSION_${key.split('_')[2]}`] || null,
-            refresh_token: process.env[`REFRESH_TOKEN_${key.split('_')[2]}`] || null
-        }))
-        .filter(wallet => wallet.privateKey && wallet.privateKey.trim() !== '');
-
-    if (wallets.length === 0) {
-        logger.error('No valid private keys found in .env');
-        return;
-    }
-
-    if (interactionCount === null) {
-        interactionCount = await new Promise((resolve) => {
-            readline.question('Enter the number of interactions per agent: ', (answer) => {
-                const num = parseInt(answer);
-                if (isNaN(num) || num < 1 || num > 99999) {
-                    logger.error('Invalid input. Please enter a number between 1 and 99999.');
-                    process.exit(1);
+                for (let j = 0; j < txCount; j++) {
+                    const transactionFunction = async (nonce) => {
+                        return await faucetContract.mint(
+                            tokenAddress,
+                            wallet.address,
+                            amountWei,
+                            { nonce: nonce }
+                        );
+                    };
+                    const success = await this.executeTransactionWithRetry(wallet, transactionFunction, 'Minting', j, txCount, selectedToken, delay);
+                    if (j < txCount - 1 && success) {
+                        await this.getRandomDelay(delay);
+                    }
                 }
-                resolve(num);
-            });
-        });
-    }
-
-    if (apiKey === null) {
-        apiKey = await new Promise((resolve) => {
-            readline.question('Enter your 2Captcha API key (press Enter to skip faucet claim): ', (answer) => {
-                resolve(answer.trim() || null);
-            });
-        });
-    }
-
-    for (const { privateKey, neo_session, refresh_token } of wallets) {
-        const wallet = getWallet(privateKey);
-        if (!wallet) continue;
-
-        logger.wallet(`Processing wallet: ${wallet.address}`);
-
-        const loginData = await login(wallet, neo_session, refresh_token);
-        if (!loginData) continue;
-
-        const { access_token, aa_address, displayed_name, cookieHeader } = loginData;
-        if (!aa_address) continue;
-
-        const profile = await getUserProfile(access_token);
-        if (!profile) continue;
-
-        logger.info(`User: ${profile.profile.displayed_name || displayed_name || 'Unknown'}`);
-        logger.info(`EOA Address: ${profile.profile.eoa_address || wallet.address}`);
-        logger.info(`Smart Account: ${profile.profile.smart_account_address || aa_address}`);
-        logger.info(`Total XP Points: ${profile.profile.total_xp_points || 0}`);
-        logger.info(`Referral Code: ${profile.profile.referral_code || 'None'}`);
-        logger.info(`Badges Minted: ${profile.profile.badges_minted?.length || 0}`);
-        logger.info(`Twitter Connected: ${profile.social_accounts?.twitter?.id ? 'Yes' : 'No'}`);
-
-        const stakeInfo = await getStakeInfo(access_token, cookieHeader);
-        if (stakeInfo) {
-            logger.info(`----- Stake Information -----`);
-            logger.info(`My Staked Amount: ${stakeInfo.my_staked_amount} tokens`);
-            logger.info(`Total Staked Amount: ${stakeInfo.staked_amount} tokens`);
-            logger.info(`Delegator Count: ${stakeInfo.delegator_count}`);
-            logger.info(`APR: ${stakeInfo.apr}%`);
-            logger.info(`-----------------------------`);
-        }
-
-        if (apiKey) {
-            await claimDailyFaucet(access_token, cookieHeader, apiKey);
-        } else {
-            logger.info('Skipping faucet claim (no 2Captcha API key provided)');
-        }
-
-        await stakeToken(access_token, cookieHeader);
-
-        await claimStakeRewards(access_token, cookieHeader);
-
-        for (const agent of agents) {
-            const agentHeader = agent.name === 'Professor' ? '\n----- PROFESSOR -----' :
-                               agent.name === 'Crypto Buddy' ? '----- CRYPTO BUDDY -----' :
-                               '----- SHERLOCK -----';
-            logger.agent(`${agentHeader}`);
-
-            for (let i = 0; i < interactionCount; i++) {
-                const prompt = getRandomPrompt(agent.name, promptGenerators);
-                // Increased delay between agent interactions to mitigate 504 errors
-                await interactWithAgent(access_token, aa_address, cookieHeader, agent, prompt, i + 1);
-                await new Promise(resolve => setTimeout(resolve, 5000)); // 5-second delay
+            } catch (error) {
+                logger.error(`Error processing wallet ${i + 1}: ${error.message}`);
             }
-            logger.agent('\n');
+
+            if (i < this.wallets.length - 1) {
+                await this.getRandomDelay(delay);
+            }
+        }
+        logger.success('Faucet Token Minting Process Completed.');
+    }
+
+    async supplyERC20Tokens() {
+        logger.step('Starting ERC20 Token Supply');
+
+        console.log('\nAvailable tokens for supply:');
+        const tokenNames = Object.keys(CONTRACTS.TOKENS);
+        tokenNames.forEach((token, index) => {
+            console.log(`${index + 1}. ${token}`);
+        });
+
+        const tokenChoice = await this.getUserInput('Select token to supply (1-6):');
+        const tokenIndex = parseInt(tokenChoice) - 1;
+
+        if (tokenIndex < 0 || tokenIndex >= tokenNames.length) {
+            logger.error('Invalid token selection');
+            return;
+        }
+
+        const selectedToken = tokenNames[tokenIndex];
+        const tokenAddress = CONTRACTS.TOKENS[selectedToken];
+
+        const amount = await this.getUserInput(`Enter amount of ${selectedToken} to supply:`);
+        const details = await this.promptTransactionDetails();
+        if (!details) return;
+        const { txCount, delay } = details;
+
+        const decimals = (selectedToken === 'USDT' || selectedToken === 'USDC' || selectedToken === 'BTC') ? 6 : 18;
+        const amountWei = ethers.parseUnits(amount, decimals);
+
+        for (let i = 0; i < this.wallets.length; i++) {
+            const wallet = this.wallets[i];
+            logger.loading(`Processing wallet ${i + 1}: ${wallet.address}`);
+
+            try {
+                const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, wallet);
+
+                for (let j = 0; j < txCount; j++) {
+                    const approveFunction = async (nonce) => {
+                        return await tokenContract.approve(
+                            CONTRACTS.SUPPLY_CONTRACT,
+                            ethers.MaxUint256,
+                            { nonce: nonce }
+                        );
+                    };
+                    const approveSuccess = await this.executeTransactionWithRetry(wallet, approveFunction, `Approving ${selectedToken}`, j, txCount, null, delay);
+
+                    if (!approveSuccess) {
+                        logger.error(`Skipping supply for wallet ${i + 1} due to failed approval.`);
+                        continue;
+                    }
+
+                    await this.getRandomDelay(2);
+
+                    const supplyFunction = async (nonce) => {
+                        const iface = new ethers.Interface([
+                            "function supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)"
+                        ]);
+                        const supplyData = iface.encodeFunctionData("supply", [
+                            tokenAddress,
+                            amountWei,
+                            wallet.address,
+                            0
+                        ]);
+                        return await wallet.sendTransaction({
+                            to: CONTRACTS.SUPPLY_CONTRACT,
+                            data: supplyData,
+                            gasLimit: 500000,
+                            nonce: nonce
+                        });
+                    };
+                    const supplySuccess = await this.executeTransactionWithRetry(wallet, supplyFunction, `Supplying ${selectedToken}`, j, txCount, null, delay);
+
+                    if (j < txCount - 1 && supplySuccess) {
+                        await this.getRandomDelay(delay);
+                    }
+                }
+            } catch (error) {
+                logger.error(`Error processing wallet ${i + 1}: ${error.message}`);
+            }
+
+            if (i < this.wallets.length - 1) {
+                await this.getRandomDelay(delay);
+            }
+        }
+        logger.success('ERC20 Token Supply Process Completed.');
+    }
+
+    async borrowTokens() {
+        logger.step('Starting Token Borrow Process');
+
+        console.log('\nAvailable tokens for borrowing:');
+        const tokenNames = Object.keys(CONTRACTS.TOKENS);
+        tokenNames.forEach((token, index) => {
+            console.log(`${index + 1}. ${token}`);
+        });
+
+        const tokenChoice = await this.getUserInput('Select token to borrow (1-6):');
+        const tokenIndex = parseInt(tokenChoice) - 1;
+
+        if (tokenIndex < 0 || tokenIndex >= tokenNames.length) {
+            logger.error('Invalid token selection');
+            return;
+        }
+
+        const selectedToken = tokenNames[tokenIndex];
+        const tokenAddress = CONTRACTS.TOKENS[selectedToken];
+
+        const amount = await this.getUserInput(`Enter amount of ${selectedToken} to borrow:`);
+        const details = await this.promptTransactionDetails();
+        if (!details) return;
+        const { txCount, delay } = details;
+
+        const decimals = (selectedToken === 'USDT' || selectedToken === 'USDC' || selectedToken === 'BTC') ? 6 : 18;
+        const amountWei = ethers.parseUnits(amount, decimals);
+
+        for (let i = 0; i < this.wallets.length; i++) {
+            const wallet = this.wallets[i];
+            logger.loading(`Processing wallet ${i + 1}: ${wallet.address}`);
+
+            try {
+                for (let j = 0; j < txCount; j++) {
+                    const transactionFunction = async (nonce) => {
+                        const iface = new ethers.Interface([
+                            "function borrow(address asset, uint256 amount, uint256 interestRateMode, uint16 referralCode, address onBehalfOf)"
+                        ]);
+                        const borrowData = iface.encodeFunctionData("borrow", [
+                            tokenAddress,
+                            amountWei,
+                            2,
+                            0,
+                            wallet.address
+                        ]);
+                        return await wallet.sendTransaction({
+                            to: CONTRACTS.SUPPLY_CONTRACT,
+                            data: borrowData,
+                            gasLimit: 500000,
+                            nonce: nonce
+                        });
+                    };
+                    const success = await this.executeTransactionWithRetry(wallet, transactionFunction, 'Borrowing', j, txCount, selectedToken, delay);
+                    if (j < txCount - 1 && success) {
+                        await this.getRandomDelay(delay);
+                    }
+                }
+            } catch (error) {
+                logger.error(`Error processing wallet ${i + 1}: ${error.message}`);
+            }
+
+            if (i < this.wallets.length - 1) {
+                await this.getRandomDelay(delay);
+            }
+        }
+        logger.success('Token Borrow Process Completed.');
+    }
+
+    async withdrawTokens() {
+        logger.step('Starting Token Withdraw Process');
+
+        console.log('\nAvailable tokens for withdrawal:');
+        const tokenNames = Object.keys(CONTRACTS.TOKENS);
+        tokenNames.forEach((token, index) => {
+            console.log(`${index + 1}. ${token}`);
+        });
+
+        const tokenChoice = await this.getUserInput('Select token to withdraw (1-6):');
+        const tokenIndex = parseInt(tokenChoice) - 1;
+
+        if (tokenIndex < 0 || tokenIndex >= tokenNames.length) {
+            logger.error('Invalid token selection');
+            return;
+        }
+
+        const selectedToken = tokenNames[tokenIndex];
+        const tokenAddress = CONTRACTS.TOKENS[selectedToken];
+
+        const amount = await this.getUserInput(`Enter amount of ${selectedToken} to withdraw:`);
+        const details = await this.promptTransactionDetails();
+        if (!details) return;
+        const { txCount, delay } = details;
+
+        const decimals = (selectedToken === 'USDT' || selectedToken === 'USDC' || selectedToken === 'BTC') ? 6 : 18;
+        const amountWei = ethers.parseUnits(amount, decimals);
+
+        for (let i = 0; i < this.wallets.length; i++) {
+            const wallet = this.wallets[i];
+            logger.loading(`Processing wallet ${i + 1}: ${wallet.address}`);
+
+            try {
+                for (let j = 0; j < txCount; j++) {
+                    const transactionFunction = async (nonce) => {
+                        const iface = new ethers.Interface([
+                            "function withdraw(address asset, uint256 amount, address to)"
+                        ]);
+                        const withdrawData = iface.encodeFunctionData("withdraw", [
+                            tokenAddress,
+                            amountWei,
+                            wallet.address
+                        ]);
+                        return await wallet.sendTransaction({
+                            to: CONTRACTS.SUPPLY_CONTRACT,
+                            data: withdrawData,
+                            gasLimit: 500000,
+                            nonce: nonce
+                        });
+                    };
+                    const success = await this.executeTransactionWithRetry(wallet, transactionFunction, 'Withdrawing', j, txCount, selectedToken, delay);
+                    if (j < txCount - 1 && success) {
+                        await this.getRandomDelay(delay);
+                    }
+                }
+            } catch (error) {
+                logger.error(`Error processing wallet ${i + 1}: ${error.message}`);
+            }
+
+            if (i < this.wallets.length - 1) {
+                await this.getRandomDelay(delay);
+            }
+        }
+        logger.success('Token Withdraw Process Completed.');
+    }
+
+    async run() {
+        try {
+            await this.initialize();
+
+            while (true) {
+                const choice = await this.showMenu();
+
+                switch (choice) {
+                    case '1':
+                        await this.supplyPHRS();
+                        break;
+                    case '2':
+                        await this.mintFaucetTokens();
+                        break;
+                    case '3':
+                        await this.supplyERC20Tokens();
+                        break;
+                    case '4':
+                        await this.borrowTokens();
+                        break;
+                    case '5':
+                        await this.withdrawTokens();
+                        break;
+                    default:
+                        logger.error('Invalid choice. Please select 1-5.');
+                }
+
+                // Only prompt to continue if the script hasn't exited due to an error
+                if (!process.exitCode) {
+                    await this.getUserInput('\nPress Enter to continue...');
+                }
+            }
+        } catch (error) {
+            logger.error(`Fatal error: ${error.message}`);
+            // Ensure the readline interface is closed on fatal error
+            this.rl.close();
+            process.exit(1);
+        } finally {
+            // Ensure readline interface is closed when the script finishes gracefully
+            this.rl.close();
         }
     }
+}
 
-    logger.success('Bot execution completed');
-    const nextRunTime = getNextRunTime();
-    logger.info(`Next run scheduled at: ${nextRunTime.toLocaleString()}`);
-    displayCountdown(nextRunTime, interactionCount, apiKey);
-};
-
-const main = async () => {
-    try {
-        await dailyRun(interactionCount, apiKey);
-    } catch (error) {
-        logger.error(`Bot error: ${error.response?.data?.error || error.message}`);
-        const nextRunTime = getNextRunTime();
-        logger.info(`Next run scheduled at: ${nextRunTime.toLocaleString()}`);
-        displayCountdown(nextRunTime, interactionCount, apiKey);
-    } finally {
-        // Ensure readline interface is closed
-        if (readline) {
-            readline.close();
-        }
-    }
-};
-
-main().catch(error => {
-    logger.error(`Unhandled bot error: ${error.response?.data?.error || error.message}`);
-    // Ensure readline interface is closed even on unhandled errors
-    if (readline) {
-        readline.close();
-    }
-});
+const bot = new PharosBot();
+bot.run().catch(console.error);
