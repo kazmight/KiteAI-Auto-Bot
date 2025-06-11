@@ -2,6 +2,9 @@
 
 An automated bot for interacting with KiteAI testnet, performing daily tasks, and maximizing rewards.
 
+## Don't forget join telegram channel Dasar Pemulung for Password.
+## Links telegram: https://t.me/dasarpemulung
+
 ## Features ✨
 
 - **Automated Interactions**: Chat with KiteAI agents (Professor, Crypto Buddy, Sherlock)
